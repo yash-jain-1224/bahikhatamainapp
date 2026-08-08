@@ -60,10 +60,16 @@ export class LekhaAgent {
     documentData?: DocumentExtractionResult,
     context?: ConversationState
   ): Promise<LekhaResult> {
+    if (!entityResolution?.selectedMatch?.id) {
+      return {
+        confirmationMessage: 'Kis party se khareeda? Party ka naam batayein (jaise: "Ram Traders se 50 bag cement @ 380").',
+        posted: false,
+      };
+    }
     const partyName = entityResolution?.selectedMatch?.name
       || intent.entities.find(e => e.type === 'PARTY_NAME')?.value
       || 'Unknown';
-    
+
     const amount = this.extractAmount(intent, documentData);
     const date = this.extractDate(intent, documentData);
     const billNumber = intent.entities.find(e => e.type === 'BILL_NUMBER')?.value
@@ -129,10 +135,16 @@ export class LekhaAgent {
     documentData?: DocumentExtractionResult,
     context?: ConversationState
   ): Promise<LekhaResult> {
+    if (!entityResolution?.selectedMatch?.id) {
+      return {
+        confirmationMessage: 'Kis customer ko becha? Party ka naam batayein (jaise: "Sharma ji ko 20 bag cement @ 420 becha").',
+        posted: false,
+      };
+    }
     const partyName = entityResolution?.selectedMatch?.name
       || intent.entities.find(e => e.type === 'PARTY_NAME')?.value
       || 'Unknown';
-    
+
     const amount = this.extractAmount(intent, documentData);
     const date = this.extractDate(intent, documentData);
     const items = this.extractItems(intent, documentData);
@@ -142,20 +154,34 @@ export class LekhaAgent {
     let message = `📋 *Sales Entry Tayaar Hai:*\n\n`;
     message += `👤 Customer: ${partyName}\n`;
     message += `📅 Date: ${date}\n`;
-    
+
     if (items.length > 0) {
       message += `📦 Items:\n`;
       items.forEach(item => {
         message += `   • ${item.name} — ${item.quantity} ${item.unit} @ ₹${item.rate}\n`;
       });
     }
-    
+
     message += `💰 Total: ₹${amount.toLocaleString('en-IN')}\n`;
     message += `\nPost kar doon?`;
 
     return {
       transactionId,
       confirmationMessage: message,
+      transaction: {
+        id: transactionId,
+        tenantId: context?.tenantId,
+        type: 'sale',
+        partyId: entityResolution?.selectedMatch?.id,
+        partyName,
+        amount,
+        items,
+        date,
+        status: 'pending_approval',
+        approvalRequired: amount > (context?.preferences.approvalThreshold || 50000),
+        sourceMessageId: '',
+        createdAt: new Date().toISOString(),
+      },
       posted: false,
     };
   }
@@ -167,10 +193,16 @@ export class LekhaAgent {
     documentData?: DocumentExtractionResult,
     context?: ConversationState
   ): Promise<LekhaResult> {
+    if (!entityResolution?.selectedMatch?.id) {
+      return {
+        confirmationMessage: 'Kisko payment diya? Party ka naam batayein (jaise: "Ram Traders ko 15000 diye").',
+        posted: false,
+      };
+    }
     const partyName = entityResolution?.selectedMatch?.name
       || intent.entities.find(e => e.type === 'PARTY_NAME')?.value
       || 'Unknown';
-    
+
     const amount = this.extractAmount(intent, documentData);
     const date = this.extractDate(intent, documentData);
     const paymentMode = this.extractPaymentMode(intent, documentData);
@@ -216,12 +248,21 @@ export class LekhaAgent {
     documentData?: DocumentExtractionResult,
     context?: ConversationState
   ): Promise<LekhaResult> {
+    if (!entityResolution?.selectedMatch?.id) {
+      return {
+        confirmationMessage: 'Kisse payment mila? Party ka naam batayein (jaise: "Sharma ji se 20000 mile").',
+        posted: false,
+      };
+    }
     const partyName = entityResolution?.selectedMatch?.name
       || intent.entities.find(e => e.type === 'PARTY_NAME')?.value
       || 'Unknown';
-    
+
     const amount = this.extractAmount(intent, documentData);
+    const date = this.extractDate(intent, documentData);
     const paymentMode = this.extractPaymentMode(intent, documentData);
+    const reference = intent.entities.find(e => e.type === 'UPI_REF')?.value
+      || documentData?.extractedData.upiReference || '';
 
     const transactionId = uuidv4();
 
@@ -234,6 +275,21 @@ export class LekhaAgent {
     return {
       transactionId,
       confirmationMessage: message,
+      transaction: {
+        id: transactionId,
+        tenantId: context?.tenantId,
+        type: 'payment_in',
+        partyId: entityResolution?.selectedMatch?.id,
+        partyName,
+        amount,
+        date,
+        paymentMode,
+        reference,
+        status: 'pending_approval',
+        approvalRequired: amount > (context?.preferences.approvalThreshold || 50000),
+        sourceMessageId: '',
+        createdAt: new Date().toISOString(),
+      },
       posted: false,
     };
   }
@@ -271,6 +327,19 @@ export class LekhaAgent {
     return {
       transactionId,
       confirmationMessage: message,
+      transaction: {
+        id: transactionId,
+        tenantId: context?.tenantId,
+        type: 'expense',
+        amount,
+        date,
+        // The poster matches this against the business's expense types.
+        notes: category,
+        status: 'pending_approval',
+        approvalRequired: amount > (context?.preferences.approvalThreshold || 50000),
+        sourceMessageId: '',
+        createdAt: new Date().toISOString(),
+      },
       posted: false,
     };
   }
@@ -278,19 +347,41 @@ export class LekhaAgent {
   // ─── Stock Entry ───────────────────────────────────────────────────────────
   private async createStockEntry(
     intent: IntentClassification,
-    _context?: ConversationState
+    context?: ConversationState
   ): Promise<LekhaResult> {
-    const itemName = intent.entities.find(e => e.type === 'ITEM_NAME')?.value || 'Unknown Item';
-    const quantity = intent.entities.find(e => e.type === 'QUANTITY')?.value || '0';
+    const itemName = intent.entities.find(e => e.type === 'ITEM_NAME')?.value || '';
+    const quantity = parseFloat(intent.entities.find(e => e.type === 'QUANTITY')?.value || '0');
     const unit = intent.entities.find(e => e.type === 'UNIT')?.value || 'units';
+
+    if (!itemName || quantity <= 0) {
+      return {
+        confirmationMessage: 'Kaunsa item aur kitni quantity? Jaise: "50 bag cement stock mein aaya".',
+        posted: false,
+      };
+    }
+
+    const transactionId = uuidv4();
 
     let message = `📦 *Stock Update Tayaar Hai:*\n\n`;
     message += `📋 Item: ${itemName}\n`;
-    message += `📊 Quantity: ${quantity} ${unit}\n`;
+    message += `📊 Quantity: +${quantity} ${unit} (stock IN)\n`;
     message += `\nUpdate kar doon?`;
 
     return {
+      transactionId,
       confirmationMessage: message,
+      transaction: {
+        id: transactionId,
+        tenantId: context?.tenantId,
+        type: 'stock_adjustment',
+        amount: 0,
+        items: [{ name: itemName, quantity, unit, rate: 0, amount: 0 }],
+        date: '',
+        status: 'pending_approval',
+        approvalRequired: false,
+        sourceMessageId: '',
+        createdAt: new Date().toISOString(),
+      },
       posted: false,
     };
   }
@@ -298,10 +389,10 @@ export class LekhaAgent {
   // ─── Create Party ──────────────────────────────────────────────────────────
   private async createParty(
     intent: IntentClassification,
-    _context?: ConversationState
+    context?: ConversationState
   ): Promise<LekhaResult> {
     const partyName = intent.entities.find(e => e.type === 'PARTY_NAME')?.value || '';
-    const phone = intent.entities.find(e => e.type === 'PHONE_NUMBER')?.value || '';
+    const phone = (intent.entities.find(e => e.type === 'PHONE_NUMBER')?.value || '').replace(/\D/g, '').slice(-10);
     const gstin = intent.entities.find(e => e.type === 'GSTIN')?.value || '';
 
     if (!partyName) {
@@ -311,14 +402,42 @@ export class LekhaAgent {
       };
     }
 
+    // The platform requires a valid mobile for a party — ask now, not after
+    // the user has already approved.
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      return {
+        confirmationMessage:
+          `"${partyName}" add karne ke liye phone number chahiye.\n\n` +
+          `Aise bhejein: "naya party ${partyName} add karo phone 98xxxxxxxx"`,
+        posted: false,
+      };
+    }
+
+    const transactionId = uuidv4();
+
     let message = `👤 *Nayi Party Add Karein:*\n\n`;
     message += `📋 Name: ${partyName}\n`;
-    if (phone) message += `📱 Phone: ${phone}\n`;
+    message += `📱 Phone: ${phone}\n`;
     if (gstin) message += `🏛️ GSTIN: ${gstin}\n`;
     message += `\nAdd kar doon?`;
 
     return {
+      transactionId,
       confirmationMessage: message,
+      transaction: {
+        id: transactionId,
+        tenantId: context?.tenantId,
+        type: 'party_create',
+        partyName,
+        partyPhone: phone,
+        gstin: gstin || undefined,
+        amount: 0,
+        date: '',
+        status: 'pending_approval',
+        approvalRequired: false,
+        sourceMessageId: '',
+        createdAt: new Date().toISOString(),
+      },
       posted: false,
     };
   }
@@ -326,11 +445,11 @@ export class LekhaAgent {
   // ─── Create Item ───────────────────────────────────────────────────────────
   private async createItem(
     intent: IntentClassification,
-    _context?: ConversationState
+    context?: ConversationState
   ): Promise<LekhaResult> {
     const itemName = intent.entities.find(e => e.type === 'ITEM_NAME')?.value || '';
     const hsnCode = intent.entities.find(e => e.type === 'HSN_CODE')?.value || '';
-    const unit = intent.entities.find(e => e.type === 'UNIT')?.value || 'units';
+    const unit = intent.entities.find(e => e.type === 'UNIT')?.value || 'KG';
 
     if (!itemName) {
       return {
@@ -339,6 +458,8 @@ export class LekhaAgent {
       };
     }
 
+    const transactionId = uuidv4();
+
     let message = `📦 *Naya Item Add Karein:*\n\n`;
     message += `📋 Name: ${itemName}\n`;
     message += `📏 Unit: ${unit}\n`;
@@ -346,7 +467,20 @@ export class LekhaAgent {
     message += `\nAdd kar doon?`;
 
     return {
+      transactionId,
       confirmationMessage: message,
+      transaction: {
+        id: transactionId,
+        tenantId: context?.tenantId,
+        type: 'item_create',
+        amount: 0,
+        items: [{ name: itemName, quantity: 0, unit, rate: 0, amount: 0, hsnCode: hsnCode || undefined }],
+        date: '',
+        status: 'pending_approval',
+        approvalRequired: false,
+        sourceMessageId: '',
+        createdAt: new Date().toISOString(),
+      },
       posted: false,
     };
   }

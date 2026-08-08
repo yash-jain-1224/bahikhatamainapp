@@ -7,6 +7,7 @@
 
 import { SecureLogger } from '../middleware/pii-masking';
 import { config } from '../config';
+import { getPrisma } from './prisma';
 
 const logger = new SecureLogger('UserResolver');
 
@@ -64,21 +65,10 @@ export class UserResolutionService {
     // Check if we have a session with selected business
     const session = sessions.get(normalisedPhone);
 
-    // mockResolution() returns `resolved: true` with `role: 'OWNER'` and
-    // `isOnboarded: true` for ANY number matching /^[6-9]\d{9}$/ — so every
-    // unknown sender was treated as a registered owner and the agents then
-    // transacted against `biz_<phone>`, a business that does not exist. It was
-    // reached unconditionally: the branch below had a TODO and fell through to
-    // the same mock even when DATABASE_URL was set, so "production mode" was
-    // never actually different.
-    //
-    // Fail closed instead. Unknown senders now get the onboarding message,
-    // which is the correct answer until real resolution exists.
-    //
-    // TODO (feature): implement the real lookup — find the user by phone and
-    // their businessUser memberships. That needs a Prisma client, which this
-    // service does not have yet (@prisma/client is a dependency but nothing
-    // instantiates it), so it is a build rather than a repair.
+    // mockResolution() is a test/dev convenience only: it treats ANY valid
+    // Indian mobile as a registered owner of `biz_<phone>`. Behind an explicit
+    // opt-in flag because that behaviour in production would let unknown
+    // senders transact against a business that does not exist.
     const allowMock = process.env.WHATSAPP_AI_ALLOW_INSECURE_DEV === 'true';
 
     if (allowMock) {
@@ -86,17 +76,88 @@ export class UserResolutionService {
       return this.mockResolution(normalisedPhone, senderName, session);
     }
 
-    try {
-      if (!config.database.url) {
-        logger.error('Cannot resolve user: DATABASE_URL is not set');
-      } else {
-        logger.error('Cannot resolve user: real phone-to-business resolution is not implemented');
-      }
+    // Real resolution (ADR-2): User.phone → BusinessUser memberships. Fail
+    // closed on any lookup problem — an onboarding reply is always safe.
+    const prisma = getPrisma();
+    if (!prisma) {
+      logger.error('Cannot resolve user: DATABASE_URL is not set / Prisma unavailable');
       return {
         resolved: false,
         needsOnboarding: true,
         needsBusinessPicker: false,
         onboardingMessage: this.getOnboardingMessage(senderName),
+      };
+    }
+
+    try {
+      const user = await prisma.user.findFirst({
+        where: { phone: normalisedPhone, is_active: true },
+        select: { id: true, phone: true, name: true },
+      });
+
+      if (!user) {
+        logger.info(`No registered user for phone ending ${normalisedPhone.slice(-4)}`);
+        return {
+          resolved: false,
+          needsOnboarding: true,
+          needsBusinessPicker: false,
+          onboardingMessage: this.getOnboardingMessage(senderName),
+        };
+      }
+
+      const memberships = await prisma.businessUser.findMany({
+        where: { user_id: user.id, is_active: true, business: { is_active: true } },
+        select: {
+          role: true,
+          business: { select: { id: true, name: true } },
+        },
+        orderBy: { joined_at: 'asc' },
+      });
+
+      if (memberships.length === 0) {
+        return {
+          resolved: false,
+          needsOnboarding: true,
+          needsBusinessPicker: false,
+          onboardingMessage:
+            `Namaste ${user.name || senderName}! 🙏\n\n` +
+            `Aapka account registered hai, lekin koi business setup nahi hai.\n\n` +
+            `Kripya pehle BahiKhata app mein apna business banayein, phir WhatsApp se hisaab-kitaab manage karein.`,
+        };
+      }
+
+      const toResolved = (m: (typeof memberships)[number]): ResolvedUser => ({
+        userId: user.id,
+        phone: user.phone,
+        name: user.name || senderName,
+        businessId: m.business.id,
+        businessName: m.business.name,
+        role: m.role as ResolvedUser['role'],
+        isOnboarded: true,
+      });
+
+      if (memberships.length === 1) {
+        return { resolved: true, user: toResolved(memberships[0]), needsOnboarding: false, needsBusinessPicker: false };
+      }
+
+      // Multi-business: use the stored picker selection when it is still a
+      // valid membership; otherwise ask again.
+      const selected = session?.selectedBusinessId
+        ? memberships.find(m => m.business.id === session.selectedBusinessId)
+        : undefined;
+      if (selected) {
+        return { resolved: true, user: toResolved(selected), needsOnboarding: false, needsBusinessPicker: false };
+      }
+
+      return {
+        resolved: false,
+        needsOnboarding: false,
+        needsBusinessPicker: true,
+        businessOptions: memberships.map(m => ({
+          id: m.business.id,
+          name: m.business.name,
+          role: m.role,
+        })),
       };
     } catch (error) {
       logger.error('User resolution failed', error);
@@ -129,9 +190,12 @@ export class UserResolutionService {
   }
 
   /**
-   * Upsert WhatsAppSession (preserves parity with notification-service)
+   * Upsert WhatsAppSession (preserves parity with notification-service).
+   * The DB row needs a business_id (required FK), so persistence happens only
+   * for resolved users; unknown senders still get the in-memory touch.
+   * Fire-and-forget: session bookkeeping must never fail the message pipeline.
    */
-  upsertSession(phone: string, senderName: string): void {
+  upsertSession(phone: string, senderName: string, businessId?: string): void {
     const normalisedPhone = this.normalisePhone(phone);
     const existing = sessions.get(normalisedPhone);
     if (existing) {
@@ -145,8 +209,29 @@ export class UserResolutionService {
     }
 
     logger.debug(`Session upserted for ${normalisedPhone} (${senderName})`);
-    // TODO: In production, also upsert WhatsAppSession in Prisma DB
-    // await prisma.whatsAppSession.upsert({ where: { phone }, create: {...}, update: { lastActiveAt: new Date() }})
+
+    const prisma = getPrisma();
+    if (!prisma || !businessId) return;
+
+    // updateMany-then-create instead of upsert: (phone, business_id) has no
+    // unique constraint, so upsert would need a synthetic where and could
+    // still violate the business FK — the same failure notification-service's
+    // webhook had before it switched to updateMany by phone.
+    void (async () => {
+      try {
+        const updated = await prisma.whatsAppSession.updateMany({
+          where: { phone: normalisedPhone, business_id: businessId },
+          data: { status: 'active' },
+        });
+        if (updated.count === 0) {
+          await prisma.whatsAppSession.create({
+            data: { phone: normalisedPhone, business_id: businessId, status: 'active' },
+          });
+        }
+      } catch (error) {
+        logger.warn(`WhatsAppSession persist failed: ${(error as Error).message}`);
+      }
+    })();
   }
 
   /**

@@ -193,15 +193,19 @@ export const MCP_TOOLS: MCPToolDefinition[] = [
 // definitions; advertising them as available made clients call tools that
 // return "not implemented" — so discovery endpoints must expose only this set.
 // Keep this list in sync with the switch in MCPToolExecutor.execute().
+//
+// Why only the pure tools: MCP callers authenticate with static API keys whose
+// tenantId is '*' (middleware/auth.ts) — there is no real business or acting
+// user to scope a data query to. The previous data-tool "implementations"
+// returned success with invented output (empty search results, a fake
+// created-party id, all-zero summaries), which callers could not distinguish
+// from truth. Data tools return "not implemented" until keys carry a real
+// tenant + mapped user; the WhatsApp conversational path (orchestrator →
+// GatewayClient) is where real data access lives today.
 
 export const IMPLEMENTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   'validate_gstin',
   'parse_amount',
-  'search_party',
-  'create_party',
-  'get_party_outstanding',
-  'daily_summary',
-  'gst_summary',
 ]);
 
 /** Tools that are actually executable — the only list routes should advertise. */
@@ -242,16 +246,6 @@ export class MCPToolExecutor {
         return this.executeValidateGSTIN(params);
       case 'parse_amount':
         return this.executeParseAmount(params);
-      case 'search_party':
-        return this.executeSearchParty(params);
-      case 'create_party':
-        return this.executeCreateParty(params);
-      case 'get_party_outstanding':
-        return this.executeGetOutstanding(params);
-      case 'daily_summary':
-        return this.executeDailySummary(params);
-      case 'gst_summary':
-        return this.executeGSTSummary(params);
       default:
         return { success: false, error: `Tool "${toolName}" not implemented yet` };
     }
@@ -304,58 +298,4 @@ export class MCPToolExecutor {
     };
   }
 
-  private async executeSearchParty(params: Record<string, unknown>): Promise<MCPToolResult> {
-    const query = params.query as string;
-    return {
-      success: true,
-      data: [],
-      message: `Searched for party: "${query}"`,
-      messageHindi: `"${query}" party search ki`,
-    };
-  }
-
-  private async executeCreateParty(params: Record<string, unknown>): Promise<MCPToolResult> {
-    return {
-      success: true,
-      data: { id: 'new_party_id', ...params },
-      message: `Party "${params.name}" created successfully`,
-      messageHindi: `Party "${params.name}" add ho gayi`,
-    };
-  }
-
-  private async executeGetOutstanding(_params: Record<string, unknown>): Promise<MCPToolResult> {
-    return {
-      success: true,
-      data: { total: 0, entries: [] },
-      message: 'Outstanding report generated',
-      messageHindi: 'Baaki hisaab tayaar hai',
-    };
-  }
-
-  private async executeDailySummary(_params: Record<string, unknown>): Promise<MCPToolResult> {
-    return {
-      success: true,
-      data: {
-        date: new Date().toISOString().split('T')[0],
-        sales: 0, purchases: 0,
-        paymentsIn: 0, paymentsOut: 0, expenses: 0,
-      },
-      message: 'Daily summary generated',
-      messageHindi: 'Aaj ka hisaab tayaar hai',
-    };
-  }
-
-  private async executeGSTSummary(params: Record<string, unknown>): Promise<MCPToolResult> {
-    return {
-      success: true,
-      data: {
-        month: params.month, year: params.year,
-        outputTax: { cgst: 0, sgst: 0, igst: 0 },
-        inputTax: { cgst: 0, sgst: 0, igst: 0 },
-        netPayable: { cgst: 0, sgst: 0, igst: 0, total: 0 },
-      },
-      message: 'GST summary generated',
-      messageHindi: 'GST report tayaar hai',
-    };
-  }
 }

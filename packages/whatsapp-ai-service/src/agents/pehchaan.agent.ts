@@ -8,12 +8,17 @@ import {
   ConversationState,
 } from '../types';
 import { config } from '../config';
+import { GatewayClient } from '../services/gateway-client';
+import { SecureLogger } from '../middleware/pii-masking';
+
+const logger = new SecureLogger('PehchaanAgent');
 
 export class PehchaanAgent {
   // ─── Resolve Entity ────────────────────────────────────────────────────────
   async resolveEntity(
     query: string,
-    context: ConversationState
+    context: ConversationState,
+    gateway?: GatewayClient
   ): Promise<EntityResolutionResult> {
     const normalizedQuery = this.normalizePartyName(query);
 
@@ -35,7 +40,7 @@ export class PehchaanAgent {
     }
 
     // Step 2: Search parties in database
-    const matches = await this.searchParties(normalizedQuery, context.tenantId);
+    const matches = await this.searchParties(normalizedQuery, context.tenantId, gateway);
 
     // Step 3: Rank by relevance + recency
     const rankedMatches = this.rankMatches(matches, context);
@@ -73,13 +78,17 @@ export class PehchaanAgent {
   }
 
   // ─── Search Parties ────────────────────────────────────────────────────────
-  private async searchParties(query: string, tenantId: string): Promise<EntityMatch[]> {
+  private async searchParties(
+    query: string,
+    tenantId: string,
+    gateway?: GatewayClient
+  ): Promise<EntityMatch[]> {
     // Try Azure AI Search first (vector + semantic)
     const azureSearchResults = await this.searchWithAzureAI(query, tenantId);
     if (azureSearchResults.length > 0) return azureSearchResults;
 
-    // Fallback: Fuzzy database search
-    return this.fuzzyDatabaseSearch(query, tenantId);
+    // Fallback: real party search through the platform (works without Azure)
+    return this.gatewayPartySearch(query, gateway);
   }
 
   // ─── Azure AI Search (Vector + Semantic) ───────────────────────────────────
@@ -130,15 +139,59 @@ export class PehchaanAgent {
     }
   }
 
-  // ─── Fuzzy Database Search ─────────────────────────────────────────────────
-  private async fuzzyDatabaseSearch(query: string, _tenantId: string): Promise<EntityMatch[]> {
-    // Generate fuzzy variants for Hindi transliteration
-    const variants = this.generateFuzzyVariants(query);
+  // ─── Gateway Party Search (real data, tenant-scoped by the service) ────────
+  private async gatewayPartySearch(query: string, gateway?: GatewayClient): Promise<EntityMatch[]> {
+    if (!gateway) return [];
 
-    // This would normally query the database
-    // For now, return empty - will be connected to Prisma
-    console.log(`🔍 Fuzzy search for: ${variants.join(', ')}`);
-    return [];
+    interface PartyRow {
+      id: string;
+      name: string;
+      type: string;
+      city?: string | null;
+      gst_number?: string | null;
+      phone?: string | null;
+    }
+
+    const toMatch = (p: PartyRow, score: number): EntityMatch => ({
+      id: p.id,
+      name: p.name,
+      type: p.type === 'SUPPLIER' ? 'vendor' : p.type === 'CUSTOMER' ? 'customer' : 'both',
+      score,
+      metadata: {
+        city: p.city || undefined,
+        gstin: p.gst_number || undefined,
+        phone: p.phone || undefined,
+        recentTransactions: 0,
+      },
+    });
+
+    const scoreFor = (name: string, q: string): number => {
+      const n = name.toLowerCase();
+      if (n === q) return 0.95;
+      if (n.startsWith(q) || this.normalizePartyName(name) === q) return 0.88;
+      return 0.7;
+    };
+
+    try {
+      // Primary query first; transliteration variants only if nothing matched
+      // (each variant is one extra service call — cap at 2).
+      const variants = [query, ...this.generateFuzzyVariants(query).filter(v => v !== query).slice(0, 2)];
+      const seen = new Map<string, EntityMatch>();
+
+      for (const variant of variants) {
+        const { data } = await gateway.get<PartyRow[]>('/api/v1/profile/parties', { search: variant });
+        for (const p of data || []) {
+          if (!seen.has(p.id)) seen.set(p.id, toMatch(p, scoreFor(p.name, query)));
+        }
+        if (seen.size > 0) break;
+      }
+
+      return [...seen.values()];
+    } catch (error) {
+      // Resolution failure is not fatal — the caller asks the user instead.
+      logger.warn(`Gateway party search failed: ${(error as Error).message}`);
+      return [];
+    }
   }
 
   // ─── Rank Matches ──────────────────────────────────────────────────────────

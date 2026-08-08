@@ -42,6 +42,7 @@ const PartyDetailPage = lazy(() => import('@/components/parties/PartyDetailPage'
 const CutterDetailPage = lazy(() => import('@/components/parties/CutterDetailPage'));
 const HelpSupportPage = lazy(() => import('@/components/help/HelpSupportPage'));
 const BillsPage = lazy(() => import('@/components/bills/BillsPage'));
+const WhatsAppAIDashboard = lazy(() => import('@/components/whatsapp-ai/WhatsAppAIDashboard'));
 const NotFoundPage = lazy(() => import('@/components/shared/NotFoundPage'));
 const AccessDeniedPage = lazy(() => import('@/components/shared/AccessDeniedPage'));
 
@@ -270,6 +271,9 @@ export default function App() {
 
         {/* Help & Support */}
         <Route path="/help" element={<ProtectedRoute><HelpSupportPage /></ProtectedRoute>} />
+
+        {/* WhatsApp AI (Munshi) dashboard */}
+        <Route path="/whatsapp-ai" element={<ProtectedRoute><WhatsAppAIDashboard /></ProtectedRoute>} />
 
         {/* Admin — separate route tree, restricted to super admins only */}
         <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />

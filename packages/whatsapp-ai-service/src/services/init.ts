@@ -31,11 +31,31 @@ export async function initializeServices(): Promise<void> {
     }
   }
 
+  // ─── Production fail-fast for the accounting data plane ────────────────────
+  // A WhatsApp-enabled production deployment without JWT_SECRET/DATABASE_URL
+  // would resolve nobody and post nothing — every user would get onboarding
+  // or "service unavailable" replies. That is a misconfiguration, not a mode.
+  if (config.nodeEnv === 'production' && anyWhatsAppConfigured) {
+    const missingData: string[] = [];
+    if (!config.auth.jwtSecret) missingData.push('JWT_SECRET');
+    if (!config.database.url) missingData.push('DATABASE_URL');
+    if (missingData.length > 0) {
+      throw new Error(
+        `WhatsApp is configured in production but ${missingData.join(' and ')} is missing — ` +
+        'user resolution and accounting actions cannot work. Set the missing variable(s), ' +
+        'or remove all WHATSAPP_* variables to run in the degraded (webhook-disabled) mode.'
+      );
+    }
+  }
+
   // Validate critical config
   const warnings: string[] = [];
 
   if (!config.whatsapp.accessToken) {
     warnings.push('⚠️  WHATSAPP_ACCESS_TOKEN not set - webhook will not send messages');
+  }
+  if (!config.auth.jwtSecret) {
+    warnings.push('⚠️  JWT_SECRET not set - accounting actions (post/reports) disabled');
   }
   if (!config.azure.openai.endpoint) {
     warnings.push('⚠️  AZURE_OPENAI_ENDPOINT not set - AI features disabled');

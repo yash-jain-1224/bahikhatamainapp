@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { User, Phone, Mail, Building2, Save, Sun, Moon, Monitor, Clock, AlertTriangle, ArrowRight } from 'lucide-react';
-import { Button, Input, Card, CardContent, CardHeader, CardTitle, Avatar, AvatarFallback, Separator, Badge } from '@/components/ui';
+import { User, Phone, Mail, Building2, Save, Sun, Moon, Monitor, Clock, AlertTriangle, ArrowRight, CreditCard, Plus, Trash2, Star, Landmark } from 'lucide-react';
+import {
+  Button, Input, Card, CardContent, CardHeader, CardTitle, CardDescription,
+  Avatar, AvatarFallback, Separator, Badge, Label, Switch,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui';
 import { profileApi } from '@/lib/api';
 import { useAppSelector, useAppDispatch } from '@/hooks';
 import { useTheme } from '@/hooks/useTheme';
@@ -11,6 +15,263 @@ import { setUser } from '@/store/authSlice';
 import { cn } from '@/utils';
 import toast from 'react-hot-toast';
 import { ImageUpload } from '@/components/shared/ImageUpload';
+
+// ─── User-level Bank Accounts ────────────────────────────────────────────────
+// Backed by profile-service /profile/bank-accounts (per-user, NOT the
+// business-level accounts managed in BusinessBankSection). The service returns
+// raw snake_case records with the FULL account number (no masking server-side).
+// Request payload must be camelCase: accountName/accountNumber/ifscCode/
+// bankName/upiId/isDefault — wrong-cased keys are rejected as missing.
+
+// Mirrors the server's IFSC check in profile.service.ts (addBankAccount).
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+interface UserBankAccount {
+  id: string;
+  account_name: string;
+  account_number: string;
+  ifsc_code: string;
+  bank_name: string;
+  upi_id?: string | null;
+  is_default: boolean;
+}
+
+const EMPTY_BANK_FORM = {
+  accountName: '',
+  accountNumber: '',
+  ifscCode: '',
+  bankName: '',
+  upiId: '',
+  isDefault: false,
+};
+
+function AddBankAccountDialog({ open, onClose, onSuccess }: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { t } = useTranslation(['profile', 'common']);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(EMPTY_BANK_FORM);
+
+  useEffect(() => {
+    if (open) setForm(EMPTY_BANK_FORM);
+  }, [open]);
+
+  const handleSave = async () => {
+    if (!form.accountName.trim() || !form.accountNumber.trim() || !form.ifscCode.trim() || !form.bankName.trim()) {
+      toast.error(t('profile:bank_required_fields'));
+      return;
+    }
+    if (!IFSC_REGEX.test(form.ifscCode)) {
+      toast.error(t('profile:bank_ifsc_invalid'));
+      return;
+    }
+    try {
+      setSaving(true);
+      await profileApi.addBankAccount({
+        accountName: form.accountName.trim(),
+        accountNumber: form.accountNumber.trim(),
+        ifscCode: form.ifscCode.trim(),
+        bankName: form.bankName.trim(),
+        upiId: form.upiId.trim() || undefined,
+        isDefault: form.isDefault,
+      });
+      toast.success(t('profile:bank_added'));
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || t('profile:bank_add_error'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5 text-primary" />
+            {t('profile:bank_add_title')}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>{t('profile:bank_account_holder_label')} *</Label>
+            <Input
+              placeholder={t('profile:bank_account_holder_placeholder')}
+              value={form.accountName}
+              onChange={e => setForm(f => ({ ...f, accountName: e.target.value }))}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>{t('profile:bank_name_label')} *</Label>
+              <Input
+                placeholder={t('profile:bank_name_placeholder')}
+                value={form.bankName}
+                onChange={e => setForm(f => ({ ...f, bankName: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('profile:bank_ifsc_label')} *</Label>
+              <Input
+                placeholder={t('profile:bank_ifsc_placeholder')}
+                value={form.ifscCode}
+                onChange={e => setForm(f => ({ ...f, ifscCode: e.target.value.toUpperCase() }))}
+                maxLength={11}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>{t('profile:bank_account_number_label')} *</Label>
+            <Input
+              placeholder={t('profile:bank_account_number_placeholder')}
+              value={form.accountNumber}
+              onChange={e => setForm(f => ({ ...f, accountNumber: e.target.value.replace(/\D/g, '') }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('profile:bank_upi_label')}</Label>
+            <Input
+              placeholder={t('profile:bank_upi_placeholder')}
+              value={form.upiId}
+              onChange={e => setForm(f => ({ ...f, upiId: e.target.value }))}
+            />
+          </div>
+          <div className="flex items-center justify-between pt-2">
+            <div>
+              <p className="text-sm font-medium">{t('profile:bank_set_default')}</p>
+              <p className="text-xs text-muted-foreground">{t('profile:bank_set_default_desc')}</p>
+            </div>
+            <Switch checked={form.isDefault} onCheckedChange={v => setForm(f => ({ ...f, isDefault: v }))} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('common:cancel')}</Button>
+          <Button onClick={handleSave} loading={saving}>
+            {t('profile:bank_add_account')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BankAccountsCard() {
+  const { t } = useTranslation(['profile', 'common']);
+  const [accounts, setAccounts] = useState<UserBankAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const fetchAccounts = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError(false);
+      const { data } = await profileApi.listBankAccounts();
+      setAccounts(data?.data || []);
+    } catch {
+      // A failed list must never render as the "no accounts yet" empty state.
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm(t('profile:bank_delete_confirm'))) return;
+    try {
+      setDeletingId(id);
+      await profileApi.deleteBankAccount(id);
+      toast.success(t('profile:bank_deleted'));
+      fetchAccounts();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || t('profile:bank_delete_error'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <Card className="glass">
+      <CardHeader className="flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <CreditCard className="h-5 w-5 text-primary" /> {t('profile:bank_accounts')}
+          </CardTitle>
+          <CardDescription>{t('profile:bank_accounts_desc')}</CardDescription>
+        </div>
+        <Button size="sm" onClick={() => setShowAdd(true)}>
+          <Plus className="h-4 w-4 mr-1.5" /> {t('profile:bank_add_account')}
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="py-8 text-center text-muted-foreground text-sm">{t('common:loading')}</div>
+        ) : loadError ? (
+          <div className="py-8 text-center">
+            <p className="text-sm text-red-400 mb-3">{t('profile:bank_load_error')}</p>
+            <Button variant="outline" size="sm" onClick={fetchAccounts}>{t('common:retry')}</Button>
+          </div>
+        ) : accounts.length === 0 ? (
+          <div className="py-8 text-center">
+            <Landmark className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">{t('profile:bank_none')}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => setShowAdd(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" /> {t('profile:bank_add_first')}
+            </Button>
+          </div>
+        ) : (
+          <div className="divide-y divide-border rounded-lg border border-border">
+            {accounts.map(acc => (
+              <div key={acc.id} className="flex items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <Landmark className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold">{acc.bank_name}</p>
+                    {acc.is_default && (
+                      <Badge variant="default" className="text-[9px] px-1.5 py-0">
+                        <Star className="h-2.5 w-2.5 mr-0.5" /> {t('profile:bank_default_badge')}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground font-mono">
+                    {acc.account_number} · IFSC: {acc.ifsc_code}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {acc.account_name}{acc.upi_id ? ` · UPI: ${acc.upi_id}` : ''}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-red-400 hover:text-red-500 shrink-0"
+                  disabled={deletingId === acc.id}
+                  onClick={() => handleDelete(acc.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      <AddBankAccountDialog
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        onSuccess={fetchAccounts}
+      />
+    </Card>
+  );
+}
 
 export default function ProfilePage() {
   const navigate = useNavigate();
@@ -141,6 +402,9 @@ export default function ProfilePage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* User-level Bank Accounts */}
+      <BankAccountsCard />
 
       {/* Subscription / Trial Status */}
       {trialInfo && (

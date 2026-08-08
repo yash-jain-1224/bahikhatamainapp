@@ -244,9 +244,14 @@ export interface DuplicateCheckResult {
 export interface TransactionEntry {
   id: string;
   tenantId: string;
-  type: 'purchase' | 'sale' | 'payment_out' | 'payment_in' | 'expense' | 'stock_adjustment';
+  type: 'purchase' | 'sale' | 'payment_out' | 'payment_in' | 'expense' | 'stock_adjustment'
+    | 'party_create' | 'item_create';
   partyId?: string;
   partyName?: string;
+  /** party_create drafts: server requires a valid Indian mobile. */
+  partyPhone?: string;
+  /** party_create drafts: optional GSTIN. */
+  gstin?: string;
   amount: number;
   items?: TransactionItem[];
   date: string;
@@ -292,6 +297,8 @@ export interface ConversationState {
 export interface ClarificationRequest {
   type: 'party_selection' | 'amount_confirm' | 'date_confirm' | 'item_confirm' | 'missing_field';
   options?: string[];
+  /** Display names parallel to `options` — needed to rebuild the selected match. */
+  optionLabels?: string[];
   field: string;
   originalMessage: string;
 }

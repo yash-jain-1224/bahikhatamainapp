@@ -83,6 +83,23 @@ subscription create/cancel scoped to `role:'OWNER'`; expired subscription no lon
 masked, phone dropped); redeem extends from `max(now, period_end)` in one transaction; Razorpay
 webhook verifies HMAC over the raw body with `timingSafeEqual` (503 unconfigured / 400 bad sig).
 
+**Round 11 (2026-08-08) — WhatsApp AI data plane built (was the biggest honest gap):**
+the TS agent plane in `packages/whatsapp-ai-service` previously never touched real data — approve
+replied "✅ Entry post ho gayi!" **without posting anything**, reports were invented figures behind
+a dev flag, user resolution was unimplemented, MCP data tools returned fabricated success. Now:
+real `User.phone`→`BusinessUser` resolution (+multi-business picker, DB session upsert);
+`gateway-client.ts` mints act-as-user JWTs (shared `JWT_SECRET`, 5-min, never escalates) and calls
+services through the gateway (`API_GATEWAY_URL`); `transaction-poster.ts` executes approved drafts
+(payments, purchases w/ item resolution, sales w/ FIFO lot allocation, expenses w/ type matching,
+stock, party/item create) and **never claims success unless the service succeeded**; hisaab reads
+real reports; pehchaan searches real parties; samajh's rule-based extractor now handles
+party/amount/phone/rate/item offline; MCP advertises only genuinely executable tools.
+Verified live by `packages/whatsapp-ai-service/scripts/e2e-smoke.ts` (message→approve→ledger,
+balance 0→-500 checked via API). Frontend: `/whatsapp-ai` dashboard routed (honest degradation,
+`VITE_WHATSAPP_AI_DASHBOARD_KEY`), user-level bank-accounts UI on ProfilePage.
+Still deferred there: Azure adapters in prod (OpenAI/DocIntel/Speech/Cosmos), dedup fingerprints,
+UPI-screenshot engine, `ai.bicep`/compose, docs — see TASKS.md "Architecture reality update".
+
 **Deliberately descoped / blocked (do not "fix" casually):**
 - **OTP/SMS login** — needs a real SMS provider + credentials (Twilio/MSG91). Non-functional by design until then.
 - **Razorpay checkout** — commercial decision; webhook plumbing is now correct but no checkout flow exists.
@@ -109,7 +126,9 @@ with DATABASE_URL pointed at production.
 ## 4. Traps that have burned previous sessions (read before coding)
 
 1. **Vendored `shared` copies.** `packages/shared/src/*` and `prisma/schema.prisma` are copied into
-   all 13 services (`packages/<svc>/src/shared/…`). Local dev/typecheck/tests read the canonical
+   the services (`packages/<svc>/src/shared/…`) — **14 copies as of 2026-08-08**: the original 13
+   plus `whatsapp-ai-service`, which now vendors the prisma schema only (it gained a Prisma client
+   for user resolution). Local dev/typecheck/tests read the canonical
    copy, but **deployed builds generate Prisma clients from the vendored schema** (`postinstall`).
    Any change to shared middleware/validators/schema must be propagated to all copies or production
    silently diverges (this caused three separate production failure classes). Check with a diff loop.
@@ -187,9 +206,11 @@ the fixture now uses a `token_…` prefix, which exercises the same `maskPII` re
 (`/(?:sk|pk|key|token|secret|api[_-]?key)[_-]?[a-zA-Z0-9_]{20,}/gi`). **Never write a
 realistic-looking credential into a test fixture** — use a non-vendor prefix.
 
-## 7. Test-suite status (round 10, this machine, 2026-08-08)
+## 7. Test-suite status (round 11, this machine, 2026-08-08)
 
-Jest API 118/118 · whatsapp-ai jest 56/56 (new suite) · Playwright: every spec passes; full
+Jest API 118/118 (re-verified after round 11) · whatsapp-ai jest 81/81 (data-plane suite added)
+· whatsapp-ai live E2E smoke PASSED (`scripts/e2e-smoke.ts`, needs the dev stack up)
+· Playwright: every spec passes; full
 parallel runs on this loaded machine show 2–6 ROTATING flakes (different set each run, all green
 on rerun) — treat a small shifting failure set as machine load, and a MASS failure as
 environment: one 66-failure run was simply the gateway's ts-node-dev process having died

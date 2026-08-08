@@ -99,6 +99,23 @@ export const config = {
     url: process.env.DATABASE_URL || '',
   },
 
+  // Platform API gateway (ADR-1: all accounting reads/writes go through the
+  // existing service APIs so RBAC, tenancy, audit and ledger invariants are
+  // enforced exactly once — this service never writes accounting rows itself).
+  gateway: {
+    url: process.env.API_GATEWAY_URL || 'http://localhost:3000',
+    timeoutMs: parseInt(process.env.GATEWAY_TIMEOUT_MS || '15000'),
+  },
+
+  // Act-as-user auth (ADR-2): services share JWT_SECRET, so this service mints
+  // short-lived access tokens for the mapped user. Empty secret = the gateway
+  // client refuses to mint (fail closed) — production presence is checked in
+  // services/init.ts alongside the other required secrets.
+  auth: {
+    jwtSecret: process.env.JWT_SECRET || '',
+    actAsUserTokenTtlSeconds: parseInt(process.env.ACT_AS_USER_TOKEN_TTL || '300'),
+  },
+
   // Business Rules
   rules: {
     defaultApprovalThreshold: 50000, // ₹50,000

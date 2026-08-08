@@ -155,7 +155,8 @@ async function processMessagePipeline(
     const resolution = await userResolver.resolve(message.from, senderName);
 
     // ── Step 4a: Upsert WhatsAppSession (parity with notification-service) ──
-    userResolver.upsertSession(message.from, senderName);
+    // DB persistence needs a business_id, so it only happens for resolved users.
+    userResolver.upsertSession(message.from, senderName, resolution.user?.businessId);
 
     // ── Step 4b: Handle unregistered users ──
     if (!resolution.resolved) {

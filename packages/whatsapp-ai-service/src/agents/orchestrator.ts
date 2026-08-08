@@ -18,6 +18,8 @@ import { JaanchAgent } from './jaanch.agent';
 import { LekhaAgent } from './lekha.agent';
 import { HisaabAgent } from './hisaab.agent';
 import { MemoryService } from '../services/memory.service';
+import { GatewayClient, isGatewayConfigured } from '../services/gateway-client';
+import { TransactionPoster } from '../services/transaction-poster';
 import { config } from '../config';
 
 export interface AgentInput {
@@ -289,13 +291,28 @@ export class AgentOrchestrator {
 
     state.entityResolution = await this.pehchaanAgent.resolveEntity(
       partyEntity.value,
-      state.conversationState
+      state.conversationState,
+      isGatewayConfigured()
+        ? new GatewayClient(
+            { userId: state.input.userId, phone: state.input.message.from.replace(/\D/g, '').slice(-10) },
+            state.input.businessId,
+          )
+        : undefined
     );
 
     // If clarification needed, stop and ask
     if (state.entityResolution.needsClarification) {
       const matches = state.entityResolution.matches;
-      
+
+      // Zero matches: nothing to pick from — parking a pendingClarification
+      // with an empty options list trapped every following reply in a
+      // "sahi number batayein" loop. Just answer and let the user rephrase.
+      if (matches.length === 0) {
+        state.response = { text: state.entityResolution.clarificationMessage || '' };
+        state.shouldStop = true;
+        return state;
+      }
+
       if (matches.length > 3) {
         // Use list for more than 3 options
         state.response = {
@@ -324,10 +341,12 @@ export class AgentOrchestrator {
         };
       }
 
-      // Save pending clarification
+      // Save pending clarification (labels kept so the selection can be
+      // rebuilt into a resolved match when the reply arrives)
       state.conversationState.pendingClarification = {
         type: 'party_selection',
         options: matches.map(m => m.id),
+        optionLabels: matches.map(m => m.name),
         field: 'partyId',
         originalMessage: this.extractMessageText(state.input.message),
       };
@@ -386,34 +405,46 @@ export class AgentOrchestrator {
       state.conversationState
     );
 
-    // Check if approval is needed
-    const amount = this.extractAmount(state.intent);
-    if (amount && amount > state.conversationState.preferences.approvalThreshold) {
-      state.response = {
-        text: result.confirmationMessage,
-        buttons: [
-          { id: 'approve_entry', title: 'Haan ✅' },
-          { id: 'reject_entry', title: 'Nahi ❌' },
-          { id: 'edit_entry', title: 'Edit ✏️' },
-        ],
-      };
-
-      state.conversationState.pendingApproval = {
-        transactionId: result.transactionId || 'pending',
-        type: state.intent.intent,
-        amount: amount,
-        description: result.confirmationMessage,
-        expiresAt: new Date(Date.now() + 30 * 60000).toISOString(), // 30 min expiry
-      };
-    } else {
-      state.response = {
-        text: result.confirmationMessage,
-        buttons: [
-          { id: 'confirm_post', title: 'Post Karein ✅' },
-          { id: 'cancel_post', title: 'Cancel ❌' },
-        ],
-      };
+    // No draft = Lekha is asking for missing details; plain reply, no buttons.
+    if (!result.transaction) {
+      state.response = { text: result.confirmationMessage };
+      return state;
     }
+
+    // A draft exists. Store it — the approval reply is a NEW message, and the
+    // poster can only execute what was actually saved here. (The old flow
+    // stored nothing and then claimed "Entry post ho gayi!" without posting —
+    // a fabricated success about a money transaction.)
+    state.transaction = result.transaction;
+    state.conversationState.pendingTransaction = result.transaction;
+
+    const amount = result.transaction.amount || 0;
+    const needsApproval = amount > state.conversationState.preferences.approvalThreshold;
+
+    state.response = {
+      text: result.confirmationMessage,
+      buttons: needsApproval
+        ? [
+            { id: 'approve_entry', title: 'Haan ✅' },
+            { id: 'reject_entry', title: 'Nahi ❌' },
+          ]
+        : [
+            { id: 'confirm_post', title: 'Post Karein ✅' },
+            { id: 'cancel_post', title: 'Cancel ❌' },
+          ],
+    };
+
+    // Both flavours park a pending approval — the confirm/cancel reply arrives
+    // as a fresh message and must be routed to handleApprovalResponse (the old
+    // below-threshold path set buttons but no pending state, so the reply fell
+    // through to intent classification and the buttons did nothing).
+    state.conversationState.pendingApproval = {
+      transactionId: result.transactionId || 'pending',
+      type: state.intent.intent,
+      amount,
+      description: result.confirmationMessage,
+      expiresAt: new Date(Date.now() + 30 * 60000).toISOString(), // 30 min expiry
+    };
 
     return state;
   }
@@ -421,10 +452,20 @@ export class AgentOrchestrator {
   private async runHisaabAgent(state: AgentState): Promise<AgentState> {
     if (!state.intent) return state;
 
+    // Reports read the REAL books via the act-as-user gateway client; when the
+    // connection is not configured, hisaab gives an honest "unavailable".
+    const gateway = isGatewayConfigured()
+      ? new GatewayClient(
+          { userId: state.input.userId, phone: state.input.message.from.replace(/\D/g, '').slice(-10) },
+          state.input.businessId,
+        )
+      : undefined;
+
     const report = await this.hisaabAgent.generateReport(
       state.intent,
       state.conversationState,
-      this.extractInteractiveId(state.input.message)
+      this.extractInteractiveId(state.input.message),
+      gateway
     );
 
     state.response = { text: report };
@@ -436,10 +477,30 @@ export class AgentOrchestrator {
     const clarification = state.conversationState.pendingClarification!;
     const messageText = this.extractMessageText(state.input.message);
 
+    if (messageText.toLowerCase().includes('cancel')) {
+      state.conversationState.pendingClarification = undefined;
+      state.response = { text: '❌ Theek hai, entry cancel kar di gayi.' };
+      state.shouldStop = true;
+      return state;
+    }
+
     // Handle party selection
     if (clarification.type === 'party_selection') {
-      const selectedId = this.extractSelection(messageText, clarification.options || []);
-      
+      // Button/list replies carry the machine id (`party_<id>`); typed replies
+      // fall back to number/name matching.
+      const interactiveId = this.extractInteractiveId(state.input.message);
+      const options = clarification.options || [];
+      const labels = clarification.optionLabels || [];
+
+      let selectedId: string | undefined;
+      if (interactiveId?.startsWith('party_')) {
+        const candidate = interactiveId.slice('party_'.length);
+        selectedId = options.find(o => o === candidate);
+      }
+      if (!selectedId) {
+        selectedId = this.extractSelection(messageText, options, labels);
+      }
+
       if (selectedId) {
         // Learn from selection
         await this.memoryService.learnEntityMapping(
@@ -448,17 +509,42 @@ export class AgentOrchestrator {
           selectedId
         );
 
-        // Clear clarification and re-process original message
+        // Re-process the ORIGINAL message with the party pre-resolved, so the
+        // entry actually continues instead of dead-ending on a status line.
         state.conversationState.pendingClarification = undefined;
-        
-        state.response = {
-          text: `✅ Party select ho gayi. Entry process ho rahi hai...`,
+        const selectedName = labels[options.indexOf(selectedId)] || messageText;
+        const selectedMatch = {
+          id: selectedId,
+          name: selectedName,
+          type: 'both' as const,
+          score: 1.0,
+          metadata: { recentTransactions: 0 },
         };
-      } else {
-        state.response = {
-          text: 'Sahi number ya naam batayein. Ya "cancel" likhein.',
+
+        state.intent = await this.samajhAgent.classify(
+          clarification.originalMessage,
+          state.conversationState
+        );
+        state.entityResolution = {
+          resolved: true,
+          matches: [selectedMatch],
+          selectedMatch,
+          needsClarification: false,
         };
+
+        state.currentNode = 'JAANCH';
+        state = await this.runJaanchAgent(state);
+        if (state.shouldStop) return state;
+
+        state.currentNode = 'LEKHA';
+        state = await this.runLekhaAgent(state);
+        state.shouldStop = true;
+        return state;
       }
+
+      state.response = {
+        text: 'Sahi number ya naam batayein. Ya "cancel" likhein.',
+      };
     }
 
     state.shouldStop = true;
@@ -469,6 +555,7 @@ export class AgentOrchestrator {
   private async handleApprovalResponse(state: AgentState): Promise<AgentState> {
     const messageText = this.extractMessageText(state.input.message).toLowerCase();
     const approval = state.conversationState.pendingApproval!;
+    const draft = state.conversationState.pendingTransaction;
 
     // Button replies are matched by their machine id first ('approve_entry' /
     // 'reject_entry' are the ids sent with the approval buttons); title-text
@@ -477,17 +564,52 @@ export class AgentOrchestrator {
     const isApproveById = interactiveId === 'approve_entry' || interactiveId === 'confirm_post';
     const isRejectById = interactiveId === 'reject_entry' || interactiveId === 'cancel_post';
 
-    if (isApproveById || messageText.includes('haan') || messageText.includes('yes') || messageText.includes('approve')) {
-      // Post the transaction
-      state.response = {
-        text: `✅ Entry post ho gayi! (₹${approval.amount.toLocaleString('en-IN')})\n\n📝 Transaction ID: ${approval.transactionId}`,
-      };
+    const clearPending = () => {
       state.conversationState.pendingApproval = undefined;
+      state.conversationState.pendingTransaction = undefined;
+    };
+
+    if (isApproveById || messageText.includes('haan') || messageText.includes('yes') || messageText.includes('approve')) {
+      if (new Date(approval.expiresAt).getTime() < Date.now()) {
+        clearPending();
+        state.response = { text: '⏰ Approval ka time nikal gaya (30 min). Kripya entry dubara bhejein.' };
+        state.shouldStop = true;
+        return state;
+      }
+
+      if (!draft) {
+        // Nothing stored to execute — never pretend it was posted.
+        clearPending();
+        state.response = { text: '❌ Entry ka draft nahi mila (session reset ho gaya hoga). Kripya entry dubara bhejein.' };
+        state.shouldStop = true;
+        return state;
+      }
+
+      if (!isGatewayConfigured()) {
+        clearPending();
+        state.response = {
+          text: '❌ Entry post nahi ho sakti — accounting service se connection configure nahi hai. Kripya app se entry karein.',
+        };
+        state.shouldStop = true;
+        return state;
+      }
+
+      // THE actual posting step: act-as-user call through the platform
+      // services. The reply is whatever really happened — never a claim.
+      const poster = new TransactionPoster(
+        new GatewayClient(
+          { userId: state.input.userId, phone: state.input.message.from.replace(/\D/g, '').slice(-10) },
+          state.input.businessId,
+        ),
+      );
+      const result = await poster.post(draft);
+      clearPending();
+      state.response = { text: result.userMessage };
     } else if (isRejectById || messageText.includes('nahi') || messageText.includes('no') || messageText.includes('cancel')) {
+      clearPending();
       state.response = {
         text: '❌ Entry cancel kar di gayi.',
       };
-      state.conversationState.pendingApproval = undefined;
     } else {
       state.response = {
         text: `Kya aap ye entry approve karte hain?\n\n${approval.description}\n\n"Haan" ya "Nahi" likhein.`,
@@ -597,13 +719,19 @@ export class AgentOrchestrator {
     return parseFloat(amountEntity.normalizedValue || amountEntity.value);
   }
 
-  private extractSelection(text: string, options: string[]): string | undefined {
+  private extractSelection(text: string, options: string[], labels: string[] = []): string | undefined {
     // Check if it's a number selection
     const num = parseInt(text);
     if (!isNaN(num) && num > 0 && num <= options.length) {
       return options[num - 1];
     }
-    // Check if the text matches an option
-    return options.find(opt => text.toLowerCase().includes(opt.toLowerCase()));
+    // Match against display names (what the user actually sees and types)
+    const lower = text.toLowerCase();
+    const labelIdx = labels.findIndex(
+      l => l && (lower.includes(l.toLowerCase()) || l.toLowerCase().includes(lower))
+    );
+    if (labelIdx >= 0) return options[labelIdx];
+    // Legacy fallback: raw option ids in the text
+    return options.find(opt => lower.includes(opt.toLowerCase()));
   }
 }

@@ -7,7 +7,34 @@
 > clarifications, and posts entries to the **existing** accounting services.
 >
 > **Status legend:** `[ ]` pending · `[~]` in progress · `[x]` implemented & verified
-> **Owner:** AI platform team · **Last updated:** 2026-07-03
+> **Owner:** AI platform team · **Last updated:** 2026-08-08
+
+---
+
+## ⚠️ Architecture reality update (2026-08-08)
+
+The implementation **diverged from the M2–M4 plan below**: the AI plane was built in
+**TypeScript inside `packages/whatsapp-ai-service`** (agents in `src/agents/`, engines in
+`src/services/`), not as the Python `ai/` packages — **no `ai/` directory exists**. The Python
+plan sections are retained for reference; their *capabilities* now map to:
+
+| Planned (Python) | Actual (TypeScript) |
+|---|---|
+| `ai/bahikhata_ai/gateway_client` (act-as-user JWT) | `src/services/gateway-client.ts` — mints 5-min HS256 JWTs (`{userId, phone, isSuperAdmin:false}`), sets `x-business-id`, unwraps the envelope **[x]** |
+| Lekha tool execution / sagas | `src/services/transaction-poster.ts` — payments (billing quick-payment), purchases (item resolution → itemIds), sales (**FIFO lot allocation** over `/sales/lots/all`), expenses (expense-type matching), stock adjust, party/item create. Never claims success unless the service succeeded **[x]** |
+| User/business resolution (Prisma) | `src/services/user-resolution.ts` — real `User.phone` → `BusinessUser` lookup, multi-business picker, DB `WhatsAppSession` upsert **[x]** |
+| Hisaab query tools | `src/agents/hisaab.agent.ts` — daily summary, party/overall outstanding, GST (entry totals), stock, P&L, cash — all real reads through the gateway **[x]** |
+| `engines/` (amounts/dates/gst/entities) | `src/services/gst.engine.ts` + rule-based extraction in `src/agents/samajh.agent.ts` (party/amount/phone/rate/item extraction works offline) **[~]** — no UPI-screenshot layout engine, no dedup fingerprint store |
+| MCP server (22 tools) | `src/mcp/` + `src/routes/mcp.routes.ts` — only genuinely executable tools advertised (`validate_gstin`, `parse_amount`); data tools refuse honestly (API keys carry no tenant/user context) **[~]** |
+| Approval flow (Cosmos + buttons) | Orchestrator `pendingApproval`/`pendingTransaction` + WhatsApp buttons; **approve now actually posts** via the gateway (it previously replied "Entry post ho gayi!" without posting anything) **[x]** |
+
+**Verified 2026-08-08** by `scripts/e2e-smoke.ts` against the live local stack (zero mocks):
+phone→user→business resolution → "Ramesh Steel ko 500 diye cash" → draft with real party →
+approve → real payment row in billing-service (`type=OUT, mode=CASH`) → party balance `0 → -500` →
+"aaj ka hisaab" reports the real ₹500. Package suite: 81 jest tests; platform API suite: 118/118.
+
+Still genuinely open: Azure adapters wiring in production (OpenAI/Doc Intelligence/Speech/Cosmos
+credentials), dedup fingerprints, UPI-screenshot engine, M5 infra (`ai.bicep`, compose), M6 docs.
 
 ---
 
@@ -235,11 +262,11 @@ MCP streamable-HTTP server exposing the §3.2 registry. Session auth: `Authoriza
 - [x] Webhook verify (GET) + HMAC-verified receive (POST), raw-body capture
 - [x] Message normaliser (text/image/document/audio/interactive/button) + wamid dedup (Redis, 7d)
 - [x] User/business resolution (Prisma; unknown-user onboarding reply; multi-business picker)
-- [~] Media pipeline: Graph media GET → Blob/local storage → signed internal URL
+- [x] Media pipeline: Graph media GET → Blob/local storage → signed internal URL (sender-controlled filenames sanitised; serverless-safe temp dir)
 - [x] Dispatcher: Service Bus producer + direct-HTTP fallback; retry with backoff; DLQ note
 - [x] Sender: text, interactive buttons, list picker; internal auth (`x-internal-key`)
-- [x] `WhatsAppSession` upsert parity with notification-service
-- [~] Unit tests: signature verification, payload parsing (fixtures for all message types), dedup
+- [x] `WhatsAppSession` upsert parity with notification-service (now persisted to DB for resolved users)
+- [x] Unit tests: signature verification, payload parsing (fixtures for all message types), dedup — plus data-plane suite (gateway client, poster, resolution, approve path); 81 tests total
 - [x] Wire gateway proxy `/api/v1/wa` + root `.env.example` additions
 
 ### M2 — Tool layer (`ai/bahikhata_ai` + `ai/mcp_server`)
@@ -292,10 +319,10 @@ MCP streamable-HTTP server exposing the §3.2 registry. Session auth: `Authoriza
 - [ ] `ROADMAP.md` (Tally export, bank feeds, GST filing, dashboard insights panel, RS256 tokens)
 
 ### M7 — Verification & hardening
-- [x] `tsc` build + jest green for wa-service; `pytest` green for `ai/` (engines, tools, pipeline)
-- [~] Adversarial multi-agent review (correctness, security, tenancy-leak, money-math) — findings fixed
-- [ ] Manual E2E script: simulated webhook POST → orchestrator (mock LLM) → mocked gateway → reply
-- [ ] Checklist sign-off in this file
+- [x] `tsc` build + jest green for wa-service (81 tests; no `ai/` Python plane exists — see reality update)
+- [x] Adversarial multi-agent review (correctness, security, tenancy-leak, money-math) — findings fixed (2026-08-08 audit round 10 + data-plane build)
+- [x] Manual E2E script: `scripts/e2e-smoke.ts` — real message → agents → REAL posting through the live local stack, ledger-verified (passed 2026-08-08; stronger than the planned mocked variant)
+- [ ] Checklist sign-off in this file (blocked on M5/M6 + production Azure credentials)
 
 ---
 

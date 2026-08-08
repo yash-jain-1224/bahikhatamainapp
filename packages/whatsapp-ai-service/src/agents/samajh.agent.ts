@@ -471,6 +471,129 @@ Respond in JSON format:
       }
     }
 
+    // Phone number (for "naya party X add karo phone 98xxxxxxxx").
+    // Extracted BEFORE the bare-number amount fallback so a mobile number can
+    // never be read as ₹9,87,65,43,210.
+    const phonePattern = /(?<!\d)([6-9]\d{9})(?!\d)/g;
+    let phoneMatch;
+    while ((phoneMatch = phonePattern.exec(text)) !== null) {
+      const overlapsUpi = entities.some(
+        e => e.type === 'UPI_REF' && e.value === phoneMatch![1]
+      );
+      if (!overlapsUpi) {
+        entities.push({
+          type: 'PHONE_NUMBER',
+          value: phoneMatch[1],
+          confidence: 0.9,
+          position: { start: phoneMatch.index, end: phoneMatch.index + phoneMatch[0].length },
+        });
+      }
+    }
+
+    // Rate ("@ 380", "@rs 380")
+    const ratePattern = /@\s*(?:rs\.?\s*|₹\s*)?(\d+(?:\.\d+)?)/gi;
+    let rateMatch;
+    while ((rateMatch = ratePattern.exec(text)) !== null) {
+      entities.push({
+        type: 'RATE',
+        value: rateMatch[1],
+        normalizedValue: rateMatch[1],
+        confidence: 0.9,
+        position: { start: rateMatch.index, end: rateMatch.index + rateMatch[0].length },
+      });
+    }
+
+    // Bare-number amount fallback: "Ram ko 500 diye" carries no ₹/rs/multiplier
+    // marker, so the explicit patterns above miss it entirely. Only runs when
+    // they found nothing, and skips numbers already claimed by another entity
+    // (quantity, date, phone, rate, UPI ref).
+    if (!entities.some(e => e.type === 'AMOUNT')) {
+      const claimed: Array<{ start: number; end: number }> = [];
+      for (const e of entities) {
+        if (e.position) claimed.push(e.position);
+      }
+      // Quantities/units were extracted without positions — reconstruct them.
+      const qtySpanPattern = /(\d+(?:\.\d+)?)\s*(?:bags?|peti|box|kg|quintal|ton|pieces?|pcs?|dozen|litres?|ltrs?|mtrs?|meters?|feet|ft)\b/gi;
+      let qtySpan;
+      while ((qtySpan = qtySpanPattern.exec(text)) !== null) {
+        claimed.push({ start: qtySpan.index, end: qtySpan.index + qtySpan[0].length });
+      }
+
+      const barePattern = /(?<![\d.,/\-@])(\d{2,9}(?:\.\d{1,2})?)(?![\d.,/\-%])/g;
+      let best: { value: string; start: number; end: number } | undefined;
+      let bareMatch;
+      while ((bareMatch = barePattern.exec(text)) !== null) {
+        const start = bareMatch.index;
+        const end = start + bareMatch[0].length;
+        if (claimed.some(c => start < c.end && c.start < end)) continue;
+        if (!best || parseFloat(bareMatch[1]) > parseFloat(best.value)) {
+          best = { value: bareMatch[1], start, end };
+        }
+      }
+      if (best) {
+        entities.push({
+          type: 'AMOUNT',
+          value: best.value,
+          normalizedValue: best.value,
+          confidence: 0.7, // weaker signal than an explicit ₹/rs marker
+          position: { start: best.start, end: best.end },
+        });
+      }
+    }
+
+    // Item name: the word right after a quantity+unit ("50 bag cement aaya"
+    // → cement), skipping filler/verb tokens.
+    const itemStop = new Set([
+      'aaya', 'aayi', 'aaye', 'gaya', 'gayi', 'liya', 'liye', 'diya', 'diye',
+      'becha', 'kharida', 'stock', 'mein', 'me', 'ka', 'ki', 'ke', 'ko', 'se', 'aur',
+    ]);
+    const itemPattern = /\d+(?:\.\d+)?\s*(?:bags?|peti|box|kg|quintal|ton|pieces?|pcs?|dozen|litres?|ltrs?|mtrs?|meters?|feet|ft)\s+([A-Za-zऀ-ॿ]+)/gi;
+    let itemMatch;
+    while ((itemMatch = itemPattern.exec(text)) !== null) {
+      const candidate = itemMatch[1];
+      if (!itemStop.has(candidate.toLowerCase())) {
+        entities.push({
+          type: 'ITEM_NAME',
+          value: candidate,
+          confidence: 0.75,
+        });
+      }
+    }
+
+    // Party name: Hinglish dative/ablative markers — "<name> ko … diye",
+    // "<name> se … liya/mila", "<name> ka baaki". Up to three words before the
+    // marker, then leading tokens that are clearly not part of a name
+    // (numbers, units, verbs) are stripped.
+    const partyStop = new Set([
+      'aaj', 'kal', 'parso', 'abhi', 'phir', 'cash', 'upi', 'online', 'total',
+      'stock', 'payment', 'paisa', 'paise', 'rupaye', 'rs', 'bill', 'entry',
+      ...itemStop,
+    ]);
+    const partyPatterns = [
+      /((?:[A-Za-zऀ-ॿ.]+\s+){0,2}[A-Za-zऀ-ॿ.]+)\s+(?:ko|se)\b/i,
+      /((?:[A-Za-zऀ-ॿ.]+\s+){0,2}[A-Za-zऀ-ॿ.]+)\s+(?:ka|ki)\s+(?:baaki|baki|hisaab|hisab|balance|outstanding|statement)\b/i,
+    ];
+    for (const pattern of partyPatterns) {
+      const partyMatch = pattern.exec(text);
+      if (!partyMatch) continue;
+      const words = partyMatch[1]
+        .split(/\s+/)
+        .filter(w => !/^\d/.test(w));
+      // Strip leading stop-words; keep the trailing name-like run.
+      while (words.length > 0 && partyStop.has(words[0].toLowerCase())) {
+        words.shift();
+      }
+      const name = words.join(' ').trim();
+      if (name && !partyStop.has(name.toLowerCase())) {
+        entities.push({
+          type: 'PARTY_NAME',
+          value: name,
+          confidence: 0.75,
+        });
+        break;
+      }
+    }
+
     return entities;
   }
 }

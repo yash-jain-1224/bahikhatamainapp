@@ -500,6 +500,23 @@ export const profileApi = {
     api.post(`/profile/cutters/${cutterId}/transactions/mark-all-paid`),
   expenseTypes: () => api.get('/profile/expense-types'),
   createExpenseType: (data: any) => api.post('/profile/expense-types', data),
+
+  // USER-level bank accounts (profile-service /profile/bank-accounts).
+  // NOT the same as businessApi.listBankAccounts/createBankAccount above,
+  // which manage BUSINESS-level accounts under /business/:id/bank-accounts.
+  // Field names must be camelCase exactly as profile.service.ts expects:
+  // accountName, accountNumber, ifscCode, bankName, upiId?, isDefault?
+  // (the service silently has no zod layer here — wrong-cased keys 400).
+  listBankAccounts: () => api.get('/profile/bank-accounts'),
+  addBankAccount: (data: {
+    accountName: string;
+    accountNumber: string;
+    ifscCode: string;
+    bankName: string;
+    upiId?: string;
+    isDefault?: boolean;
+  }) => api.post('/profile/bank-accounts', data),
+  deleteBankAccount: (accountId: string) => api.delete(`/profile/bank-accounts/${accountId}`),
 };
 
 // ─── Notifications ───────────────────────────────────

@@ -7,7 +7,7 @@ import {
   LayoutDashboard, ShoppingCart, TrendingUp, Package, BookOpen,
   CreditCard, Users, Settings, Bell, Menu, X, ChevronDown,
   Building2, LogOut, Crown, Gift, Shield, User, FileText, HelpCircle,
-  Sun, Moon, Monitor, Check, Plus, ArrowRightLeft, Receipt, ScrollText,
+  Sun, Moon, Monitor, Check, Plus, ArrowRightLeft, Receipt, ScrollText, Bot,
 } from 'lucide-react';
 import { cn } from '@/utils';
 import { Avatar, AvatarImage, AvatarFallback, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui';
@@ -29,6 +29,7 @@ const navItems = [
   { path: '/parties', labelKey: 'nav:parties', icon: Users },
   { path: '/bills', labelKey: 'nav:bills', icon: ScrollText },
   { path: '/reports', labelKey: 'nav:reports', icon: FileText },
+  { path: '/whatsapp-ai', labelKey: 'nav:whatsapp_ai', icon: Bot },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {

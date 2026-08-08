@@ -70,11 +70,6 @@ describe('MCP registry honesty (findings B & C)', () => {
     const dummyParams: Record<string, Record<string, unknown>> = {
       validate_gstin: { gstin: '27AAPFU0939F1ZV' },
       parse_amount: { text: '15 hazaar' },
-      search_party: { query: 'Ram' },
-      create_party: { name: 'Ram', type: 'vendor' },
-      get_party_outstanding: { party_id: 'p1' },
-      daily_summary: {},
-      gst_summary: { month: 7, year: 2026 },
     };
     for (const tool of AVAILABLE_MCP_TOOLS) {
       const result = await executor.execute(tool.name, dummyParams[tool.name] || {});
@@ -87,9 +82,19 @@ describe('MCP registry honesty (findings B & C)', () => {
     expect(result.success).toBe(false);
   });
 
+  test('data tools refuse instead of fabricating (no tenant-scoped credential model yet)', async () => {
+    // These used to return success with invented output: an empty search
+    // result, a fake created-party id, all-zero summaries. They must refuse.
+    for (const tool of ['search_party', 'create_party', 'get_party_outstanding', 'daily_summary', 'gst_summary']) {
+      const result = await executor.execute(tool, { query: 'Ram', name: 'Ram', type: 'vendor', party_id: 'p1', month: 7, year: 2026 });
+      expect(result.success).toBe(false);
+      expect(IMPLEMENTED_TOOL_NAMES.has(tool)).toBe(false);
+    }
+  });
+
   test('caller-supplied business_id is stripped (tenant scoping is server-side)', async () => {
-    const params: Record<string, unknown> = { name: 'X', type: 'vendor', business_id: 'someone-elses' };
-    const result = await executor.execute('create_party', params);
+    const params: Record<string, unknown> = { text: '15 hazaar', business_id: 'someone-elses' };
+    const result = await executor.execute('parse_amount', params);
     expect(params.business_id).toBeUndefined();
     expect(JSON.stringify(result.data)).not.toContain('someone-elses');
   });
@@ -128,19 +133,27 @@ describe('parse_amount boundaries (finding I)', () => {
 // ─── H: daily summary vs outstanding routing ─────────────────────────────────
 
 describe('Hisaab report routing (finding H)', () => {
-  const previousFlag = process.env.WHATSAPP_AI_ALLOW_INSECURE_DEV;
-
-  beforeAll(() => {
-    // The placeholder report bodies are gated behind the dev flag; routing is
-    // what we assert here.
-    process.env.WHATSAPP_AI_ALLOW_INSECURE_DEV = 'true';
-  });
-  afterAll(() => {
-    if (previousFlag === undefined) delete process.env.WHATSAPP_AI_ALLOW_INSECURE_DEV;
-    else process.env.WHATSAPP_AI_ALLOW_INSECURE_DEV = previousFlag;
-  });
-
   const agent = new HisaabAgent();
+
+  // Reports now read REAL data through a gateway client; routing is asserted
+  // by which endpoint gets called and by each report's distinctive heading.
+  const makeGateway = () => {
+    const get = jest.fn((path: string) => {
+      switch (path) {
+        case '/api/v1/sales':
+        case '/api/v1/purchases':
+        case '/api/v1/expenses':
+        case '/api/v1/billing/payments':
+          return Promise.resolve({ data: [], meta: {} });
+        case '/api/v1/ledger/outstanding':
+          return Promise.resolve({ data: { parties: [], totalReceivable: 0, totalPayable: 0 } });
+        default:
+          return Promise.reject(new Error(`unexpected path ${path}`));
+      }
+    });
+    // Only `get` is exercised by reports.
+    return { get, client: { get } as unknown as import('../src/services/gateway-client').GatewayClient };
+  };
 
   const makeIntent = (rawText: string, intent: IntentClassification['intent']): IntentClassification => ({
     intent,
@@ -171,51 +184,58 @@ describe('Hisaab report routing (finding H)', () => {
   } as unknown as ConversationState;
 
   test('"Aaj ka Hisaab" button (daily_summary id) returns the daily summary', async () => {
+    const gw = makeGateway();
     const report = await agent.generateReport(
       makeIntent('Aaj ka Hisaab', 'REPORT_REQUEST'),
       context,
-      'daily_summary'
+      'daily_summary',
+      gw.client
     );
     expect(report).toContain('Aaj ka Hisaab');
     expect(report).not.toContain('Outstanding');
+    expect(gw.get).toHaveBeenCalledWith('/api/v1/sales', expect.anything());
   });
 
   test('"Baaki Hisaab" button (outstanding id) returns the outstanding report', async () => {
+    const gw = makeGateway();
     const report = await agent.generateReport(
       makeIntent('Baaki Hisaab', 'UNKNOWN'),
       context,
-      'outstanding'
+      'outstanding',
+      gw.client
     );
     expect(report).toContain('Outstanding');
+    expect(gw.get).toHaveBeenCalledWith('/api/v1/ledger/outstanding');
   });
 
   test('typed "aaj ka hisaab" (REPORT_REQUEST) reaches the daily branch', async () => {
+    const gw = makeGateway();
     const report = await agent.generateReport(
       makeIntent('aaj ka hisaab', 'REPORT_REQUEST'),
-      context
+      context,
+      undefined,
+      gw.client
     );
     expect(report).toContain('Aaj ka Hisaab');
     expect(report).not.toContain('Outstanding');
   });
 
   test('OUTSTANDING_QUERY intent routes to outstanding', async () => {
+    const gw = makeGateway();
     const report = await agent.generateReport(
       makeIntent('Ram ka baaki kitna hai', 'OUTSTANDING_QUERY'),
-      context
+      context,
+      undefined,
+      gw.client
     );
     expect(report).toContain('Outstanding');
   });
 
-  test('reports refuse (honest message) without the dev flag', async () => {
-    delete process.env.WHATSAPP_AI_ALLOW_INSECURE_DEV;
-    try {
-      const report = await agent.generateReport(
-        makeIntent('aaj ka hisaab', 'REPORT_REQUEST'),
-        context
-      );
-      expect(report).toContain('Reports abhi available nahi');
-    } finally {
-      process.env.WHATSAPP_AI_ALLOW_INSECURE_DEV = 'true';
-    }
+  test('reports refuse honestly when no gateway client is available', async () => {
+    const report = await agent.generateReport(
+      makeIntent('aaj ka hisaab', 'REPORT_REQUEST'),
+      context
+    );
+    expect(report).toContain('Reports abhi available nahi');
   });
 });
