@@ -166,7 +166,28 @@ gateway + frontend once auth exists. **Post-deploy sequence:** (1) deploy all; (
 `node scripts/set-super-admin.mjs --email <owner-chosen> --apply` against prod (verified locally:
 dry-run/apply/last-admin-revoke-guard all work).
 
-## 6. Test-suite status (round 10, this machine, 2026-08-08)
+## 6. Version control (initialized 2026-08-08)
+
+Repo: `https://github.com/yash-jain-1224/bahikhatamainapp.git`, branch `main`, 986 files.
+Local commit identity is set per-repo (`yash-jain-1224 <yash.jain.consults@gmail.com>`).
+
+**Three things are gitignored ON PURPOSE — do not "helpfully" commit them:**
+- `db-backups/` — the `*-tables-*.sql` files are pg_dump **data** dumps of the production DB
+  containing real party PII (names, phones, GST/PAN, addresses) and real figures; the `clear-*.sql`
+  scripts alongside them leak the same figures in their comments.
+- `setup-env-vars.sh` — line 12 holds the **live Azure DB connection string in plaintext**.
+  It stays local and functional. That password has sat in the working tree for a long time;
+  **rotating it is worthwhile** even though it was never pushed.
+- `.env`, `.azure-db-connection.txt` — already covered before, listed here for completeness.
+
+**GitHub push protection is ON for this repo.** It rejects any commit containing a
+vendor-shaped live key. It blocked the first push over a *fake* masking-test fixture in
+`packages/whatsapp-ai-service/tests/security.test.ts` that used a realistic `sk_live_…` shape;
+the fixture now uses a `token_…` prefix, which exercises the same `maskPII` regex branch
+(`/(?:sk|pk|key|token|secret|api[_-]?key)[_-]?[a-zA-Z0-9_]{20,}/gi`). **Never write a
+realistic-looking credential into a test fixture** — use a non-vendor prefix.
+
+## 7. Test-suite status (round 10, this machine, 2026-08-08)
 
 Jest API 118/118 · whatsapp-ai jest 56/56 (new suite) · Playwright: every spec passes; full
 parallel runs on this loaded machine show 2–6 ROTATING flakes (different set each run, all green
