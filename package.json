@@ -1,0 +1,72 @@
+{
+  "name": "bahi-khata-pro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-ready SaaS ERP - Bahi Khata Pro",
+  "workspaces": [
+    "packages/*",
+    "frontend",
+    "website"
+  ],
+  "scripts": {
+    "dev:auth": "cd packages/auth-service && npm run dev",
+    "dev:business": "cd packages/business-service && npm run dev",
+    "dev:purchase": "cd packages/purchase-service && npm run dev",
+    "dev:expense": "cd packages/expense-service && npm run dev",
+    "dev:sales": "cd packages/sales-service && npm run dev",
+    "dev:inventory": "cd packages/inventory-service && npm run dev",
+    "dev:ledger": "cd packages/ledger-service && npm run dev",
+    "dev:subscription": "cd packages/subscription-service && npm run dev",
+    "dev:billing": "cd packages/billing-service && npm run dev",
+    "dev:notification": "cd packages/notification-service && npm run dev",
+    "dev:admin": "cd packages/admin-service && npm run dev",
+    "dev:profile": "cd packages/profile-service && npm run dev",
+    "dev:referral": "cd packages/referral-service && npm run dev",
+    "dev:gateway": "cd packages/api-gateway && npm run dev",
+    "dev:whatsapp-ai": "cd packages/whatsapp-ai-service && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:website": "cd website && npm run dev",
+    "check:ports": "node scripts/check-ports.mjs",
+    "predev:all": "node scripts/check-ports.mjs",
+    "dev:all": "concurrently \"npm:dev:gateway\" \"npm:dev:auth\" \"npm:dev:business\" \"npm:dev:purchase\" \"npm:dev:sales\" \"npm:dev:inventory\" \"npm:dev:ledger\" \"npm:dev:subscription\" \"npm:dev:billing\" \"npm:dev:notification\" \"npm:dev:admin\" \"npm:dev:profile\" \"npm:dev:referral\" \"npm:dev:expense\" \"npm:dev:whatsapp-ai\" \"npm:dev:frontend\"",
+    "build:all": "npm run build --workspaces",
+    "db:generate": "cd packages/shared && npx prisma generate",
+    "db:migrate": "cd packages/shared && npx prisma migrate dev",
+    "db:migrate:prod": "cd packages/shared && npx prisma migrate deploy",
+    "db:seed": "cd packages/shared && npx prisma db seed",
+    "db:studio": "cd packages/shared && npx prisma studio",
+    "docker:up": "docker-compose -f infra/docker/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f infra/docker/docker-compose.yml down",
+    "docker:build": "docker-compose -f infra/docker/docker-compose.yml build",
+    "lint": "eslint packages/*/src/ && cd frontend && npx eslint .",
+    "test": "jest --passWithNoTests",
+    "test:e2e": "npx playwright test tests/e2e/",
+    "test:integration": "npx playwright test tests/integration/",
+    "test:api": "npx jest --config jest.config.ts tests/api/",
+    "test:load": "k6 run tests/load/load-100k.k6.js",
+    "test:spike": "k6 run tests/load/spike-100k.k6.js",
+    "test:soak": "k6 run tests/load/soak.k6.js",
+    "test:all": "npm run test:api && npx playwright test",
+    "clean": "rm -rf node_modules packages/*/node_modules frontend/node_modules"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.12.12",
+    "@types/supertest": "^7.2.0",
+    "concurrently": "^8.2.2",
+    "jest": "^30.2.0",
+    "k6": "^0.0.0",
+    "playwright": "^1.58.2",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1"
+  }
+}

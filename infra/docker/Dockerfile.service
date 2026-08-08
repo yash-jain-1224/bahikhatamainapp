@@ -1,0 +1,58 @@
+# Multi-stage build for microservices
+FROM node:20-slim AS builder
+
+ARG SERVICE_NAME
+
+# Install OpenSSL needed by Prisma engines
+RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy root package files & tsconfig (shared by all workspaces)
+COPY package.json package-lock.json* tsconfig.json ./
+
+# Copy shared package
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/shared/ ./packages/shared/
+
+# Copy specific service
+COPY packages/${SERVICE_NAME}/package.json ./packages/${SERVICE_NAME}/
+COPY packages/${SERVICE_NAME}/ ./packages/${SERVICE_NAME}/
+
+# Install dependencies
+RUN npm ci --workspace=packages/shared --workspace=packages/${SERVICE_NAME}
+
+# Generate Prisma client
+RUN cd packages/shared && npx prisma generate
+
+# Build shared and service
+RUN cd packages/shared && npm run build
+RUN cd packages/${SERVICE_NAME} && npm run build
+
+# Production stage
+FROM node:20-slim AS production
+
+ARG SERVICE_NAME
+ENV SERVICE_NAME=${SERVICE_NAME}
+
+# OpenSSL runtime for Prisma
+RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy built files (npm workspaces hoist deps to root node_modules)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/packages/shared/package.json ./packages/shared/
+COPY --from=builder /app/packages/shared/prisma ./packages/shared/prisma
+COPY --from=builder /app/packages/${SERVICE_NAME}/dist ./packages/${SERVICE_NAME}/dist
+COPY --from=builder /app/packages/${SERVICE_NAME}/package.json ./packages/${SERVICE_NAME}/
+
+# Security: non-root user
+RUN groupadd -g 1001 appgroup && \
+    useradd -m -u 1001 -g appgroup appuser
+USER appuser
+
+EXPOSE 3000-3012
+
+CMD ["sh", "-c", "node packages/${SERVICE_NAME}/dist/index.js"]

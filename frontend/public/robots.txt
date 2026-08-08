@@ -1,0 +1,36 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://bahikhata.pro/sitemap.xml
+
+# Allow marketing pages
+Allow: /en
+Allow: /hi
+Allow: /gu
+Allow: /mr
+Allow: /ta
+Allow: /te
+Allow: /kn
+Allow: /ml
+Allow: /pa
+Allow: /bn
+Allow: /or
+
+# Disallow app routes (authenticated pages)
+Disallow: /login
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /purchases
+Disallow: /sales
+Disallow: /inventory
+Disallow: /ledger
+Disallow: /payments
+Disallow: /parties
+Disallow: /profile
+Disallow: /settings
+Disallow: /business
+Disallow: /reports
+Disallow: /notifications
+Disallow: /referrals
+Disallow: /subscription
+Disallow: /help

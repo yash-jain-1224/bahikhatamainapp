@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://bahikhata.pro/en</loc>
+    <lastmod>2025-01-01</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://bahikhata.pro/en" />
+    <xhtml:link rel="alternate" hreflang="hi" href="https://bahikhata.pro/hi" />
+    <xhtml:link rel="alternate" hreflang="gu" href="https://bahikhata.pro/gu" />
+    <xhtml:link rel="alternate" hreflang="mr" href="https://bahikhata.pro/mr" />
+    <xhtml:link rel="alternate" hreflang="ta" href="https://bahikhata.pro/ta" />
+    <xhtml:link rel="alternate" hreflang="te" href="https://bahikhata.pro/te" />
+    <xhtml:link rel="alternate" hreflang="kn" href="https://bahikhata.pro/kn" />
+    <xhtml:link rel="alternate" hreflang="ml" href="https://bahikhata.pro/ml" />
+    <xhtml:link rel="alternate" hreflang="pa" href="https://bahikhata.pro/pa" />
+    <xhtml:link rel="alternate" hreflang="bn" href="https://bahikhata.pro/bn" />
+    <xhtml:link rel="alternate" hreflang="or" href="https://bahikhata.pro/or" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bahikhata.pro/en" />
+  </url>
+  <url>
+    <loc>https://bahikhata.pro/hi</loc>
+    <lastmod>2025-01-01</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://bahikhata.pro/en" />
+    <xhtml:link rel="alternate" hreflang="hi" href="https://bahikhata.pro/hi" />
+    <xhtml:link rel="alternate" hreflang="gu" href="https://bahikhata.pro/gu" />
+    <xhtml:link rel="alternate" hreflang="mr" href="https://bahikhata.pro/mr" />
+    <xhtml:link rel="alternate" hreflang="ta" href="https://bahikhata.pro/ta" />
+    <xhtml:link rel="alternate" hreflang="te" href="https://bahikhata.pro/te" />
+    <xhtml:link rel="alternate" hreflang="kn" href="https://bahikhata.pro/kn" />
+    <xhtml:link rel="alternate" hreflang="ml" href="https://bahikhata.pro/ml" />
+    <xhtml:link rel="alternate" hreflang="pa" href="https://bahikhata.pro/pa" />
+    <xhtml:link rel="alternate" hreflang="bn" href="https://bahikhata.pro/bn" />
+    <xhtml:link rel="alternate" hreflang="or" href="https://bahikhata.pro/or" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bahikhata.pro/en" />
+  </url>
+  <url>
+    <loc>https://bahikhata.pro/en/pricing</loc>
+    <lastmod>2025-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://bahikhata.pro/en/pricing" />
+    <xhtml:link rel="alternate" hreflang="hi" href="https://bahikhata.pro/hi/pricing" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bahikhata.pro/en/pricing" />
+  </url>
+  <url>
+    <loc>https://bahikhata.pro/en/features</loc>
+    <lastmod>2025-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://bahikhata.pro/en/features" />
+    <xhtml:link rel="alternate" hreflang="hi" href="https://bahikhata.pro/hi/features" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bahikhata.pro/en/features" />
+  </url>
+  <url>
+    <loc>https://bahikhata.pro/en/industries</loc>
+    <lastmod>2025-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://bahikhata.pro/en/industries" />
+    <xhtml:link rel="alternate" hreflang="hi" href="https://bahikhata.pro/hi/industries" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bahikhata.pro/en/industries" />
+  </url>
+  <url>
+    <loc>https://bahikhata.pro/en/download</loc>
+    <lastmod>2025-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://bahikhata.pro/en/download" />
+    <xhtml:link rel="alternate" hreflang="hi" href="https://bahikhata.pro/hi/download" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bahikhata.pro/en/download" />
+  </url>
+</urlset>

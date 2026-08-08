@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["tests/**/*.ts", "playwright.config.ts", "jest.config.ts"],
+  "exclude": ["node_modules", "frontend", "packages"]
+}

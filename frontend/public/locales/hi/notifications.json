@@ -1,0 +1,22 @@
+{
+  "title": "सूचनाएं",
+  "subtitle": "अपनी व्यापार गतिविधि से अपडेट रहें",
+  "tab_all": "सभी",
+  "tab_unread": "अपठित",
+  "mark_all_read": "सभी पढ़ा हुआ करें",
+  "mark_read": "पढ़ा हुआ करें",
+  "unread_count_one": "{{count}} अपठित सूचना",
+  "unread_count_other": "{{count}} अपठित सूचनाएं",
+  "all_caught_up": "सब पढ़ लिया!",
+  "all_read_toast": "सभी सूचनाएं पढ़ी गई के रूप में चिह्नित",
+  "empty_all_title": "अभी कोई सूचना नहीं",
+  "empty_all_desc": "जैसे-जैसे आप ऐप का उपयोग करेंगे, सूचनाएं यहां दिखाई देंगी",
+  "empty_unread_title": "कोई अपठित सूचना नहीं",
+  "empty_unread_desc": "सब पढ़ लिया!",
+  "type_purchase": "Purchase",
+  "type_sale": "Sale",
+  "type_payment": "Payment",
+  "type_low_stock": "Low Stock",
+  "type_alert": "Alert",
+  "type_info": "Info"
+}

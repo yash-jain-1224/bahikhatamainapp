@@ -1,0 +1,22 @@
+{
+  "title": "ବିଜ୍ଞପ୍ତି",
+  "subtitle": "Stay updated with your business activity",
+  "tab_all": "All",
+  "tab_unread": "Unread",
+  "mark_all_read": "Mark All Read",
+  "mark_read": "Mark as Read",
+  "unread_count_one": "{{count}} unread notification",
+  "unread_count_other": "{{count}} unread notifications",
+  "all_caught_up": "All caught up!",
+  "all_read_toast": "All notifications marked as read",
+  "empty_all_title": "No notifications yet",
+  "empty_all_desc": "Notifications will appear here as you use the app",
+  "empty_unread_title": "No unread notifications",
+  "empty_unread_desc": "You're all caught up!",
+  "type_purchase": "Purchase",
+  "type_sale": "Sale",
+  "type_payment": "Payment",
+  "type_low_stock": "Low Stock",
+  "type_alert": "Alert",
+  "type_info": "Info"
+}

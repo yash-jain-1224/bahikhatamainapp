@@ -1,0 +1,178 @@
+# =============================================================================
+# Azure DevOps CI/CD Pipeline - Bahi Khata Pro
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - packages/**
+      - frontend/**
+      - infra/**
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  - group: bahi-khata-variables
+  - name: registryName
+    value: bahikhatapro
+  - name: registryUrl
+    value: bahikhatapro.azurecr.io
+  - name: aksClusterName
+    value: bahi-khata-aks
+  - name: aksResourceGroup
+    value: bahi-khata-rg
+
+stages:
+  # ==========================================================================
+  # Build & Test
+  # ==========================================================================
+  - stage: Build
+    displayName: 'Build & Test'
+    jobs:
+      - job: BuildAndTest
+        displayName: 'Build and Test All Services'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '20.x'
+            displayName: 'Install Node.js'
+
+          - script: npm ci
+            displayName: 'Install root dependencies'
+
+          - script: |
+              cd packages/shared
+              npm ci
+              npx prisma generate
+              npm run build
+            displayName: 'Build shared package'
+
+          - script: npm run lint
+            displayName: 'Lint'
+            continueOnError: true
+
+          - script: npm test
+            displayName: 'Run Tests'
+
+  # ==========================================================================
+  # Build Docker Images
+  # ==========================================================================
+  - stage: DockerBuild
+    displayName: 'Build Docker Images'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: BuildImages
+        displayName: 'Build and Push Images'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          matrix:
+            api-gateway:
+              serviceName: api-gateway
+            auth-service:
+              serviceName: auth-service
+            business-service:
+              serviceName: business-service
+            purchase-service:
+              serviceName: purchase-service
+            sales-service:
+              serviceName: sales-service
+            subscription-service:
+              serviceName: subscription-service
+            frontend:
+              serviceName: frontend
+        steps:
+          - task: Docker@2
+            displayName: 'Build and Push $(serviceName)'
+            inputs:
+              containerRegistry: $(registryName)
+              repository: $(serviceName)
+              command: buildAndPush
+              Dockerfile: |
+                $(Build.SourcesDirectory)/infra/docker/$(if [ "$(serviceName)" = "frontend" ]; then echo "Dockerfile.frontend"; else echo "Dockerfile.service"; fi)
+              buildContext: $(Build.SourcesDirectory)
+              tags: |
+                $(Build.BuildId)
+                latest
+              arguments: '--build-arg SERVICE_NAME=$(serviceName)'
+
+  # ==========================================================================
+  # Deploy to Staging
+  # ==========================================================================
+  - stage: DeployStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: DockerBuild
+    condition: succeeded()
+    jobs:
+      - deployment: DeployToStaging
+        displayName: 'Deploy to AKS Staging'
+        environment: 'staging'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: KubernetesManifest@0
+                  displayName: 'Deploy to AKS'
+                  inputs:
+                    action: deploy
+                    kubernetesServiceConnection: 'aks-staging-connection'
+                    namespace: staging
+                    manifests: |
+                      $(Build.SourcesDirectory)/infra/k8s/base/*.yaml
+                    containers: |
+                      $(registryUrl)/api-gateway:$(Build.BuildId)
+                      $(registryUrl)/auth-service:$(Build.BuildId)
+                      $(registryUrl)/business-service:$(Build.BuildId)
+                      $(registryUrl)/purchase-service:$(Build.BuildId)
+                      $(registryUrl)/sales-service:$(Build.BuildId)
+                      $(registryUrl)/subscription-service:$(Build.BuildId)
+
+  # ==========================================================================
+  # Deploy to Production
+  # ==========================================================================
+  - stage: DeployProduction
+    displayName: 'Deploy to Production'
+    dependsOn: DeployStaging
+    condition: succeeded()
+    jobs:
+      - deployment: DeployToProduction
+        displayName: 'Deploy to AKS Production'
+        environment: 'production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    echo "Running DB migrations..."
+                    # Run Prisma migrations
+                  displayName: 'Run DB Migrations'
+
+                - task: KubernetesManifest@0
+                  displayName: 'Deploy to AKS Production'
+                  inputs:
+                    action: deploy
+                    kubernetesServiceConnection: 'aks-prod-connection'
+                    namespace: production
+                    manifests: |
+                      $(Build.SourcesDirectory)/infra/k8s/base/*.yaml
+                    containers: |
+                      $(registryUrl)/api-gateway:$(Build.BuildId)
+                      $(registryUrl)/auth-service:$(Build.BuildId)
+                      $(registryUrl)/business-service:$(Build.BuildId)
+                      $(registryUrl)/purchase-service:$(Build.BuildId)
+                      $(registryUrl)/sales-service:$(Build.BuildId)
+                      $(registryUrl)/subscription-service:$(Build.BuildId)

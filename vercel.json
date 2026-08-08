@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "name": "bahi-khata-frontend",
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "frontend/dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "https://api-gateway-navy-eta.vercel.app/api/$1"
+    },
+    {
+      "src": "/uploads/(.*)",
+      "dest": "https://api-gateway-navy-eta.vercel.app/uploads/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/$1"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
+}

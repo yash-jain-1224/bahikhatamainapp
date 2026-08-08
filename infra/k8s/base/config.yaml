@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bahi-khata-config
+data:
+  NODE_ENV: "production"
+  AUTH_SERVICE_PORT: "3001"
+  BUSINESS_SERVICE_PORT: "3002"
+  PURCHASE_SERVICE_PORT: "3003"
+  SALES_SERVICE_PORT: "3004"
+  INVENTORY_SERVICE_PORT: "3005"
+  LEDGER_SERVICE_PORT: "3006"
+  SUBSCRIPTION_SERVICE_PORT: "3007"
+  BILLING_SERVICE_PORT: "3008"
+  NOTIFICATION_SERVICE_PORT: "3009"
+  ADMIN_SERVICE_PORT: "3010"
+  PROFILE_SERVICE_PORT: "3011"
+  REFERRAL_SERVICE_PORT: "3012"
+  LOG_LEVEL: "info"
+  CORS_ORIGIN: "https://app.bahikhata.pro"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bahi-khata-secrets
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://user:password@postgres-service:5432/bahi_khata_pro"
+  REDIS_URL: "redis://redis-service:6379"
+  JWT_SECRET: "CHANGE_ME_IN_PRODUCTION"
+  JWT_REFRESH_SECRET: "CHANGE_ME_IN_PRODUCTION"
+  RAZORPAY_KEY_ID: ""
+  RAZORPAY_KEY_SECRET: ""
+  RAZORPAY_WEBHOOK_SECRET: ""
+  WHATSAPP_ACCESS_TOKEN: ""
+  AZURE_STORAGE_CONNECTION_STRING: ""
